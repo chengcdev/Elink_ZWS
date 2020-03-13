@@ -1736,8 +1736,10 @@ int main_ble_callback_proc( BLE_NOTIFY_E state, char * data, int size )
         case BLE_NOTI_BIND_LOCK:
         case BLE_NOTI_GET_LOCKINFO:
             {
-                mlink_gpio_beep_start(3);
-
+                if(storage_get_mac_sucess() != 0)
+                {
+                    mlink_gpio_beep_start(3);
+                }
             break;
         }
 
