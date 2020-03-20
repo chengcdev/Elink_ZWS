@@ -168,7 +168,7 @@ static char Bindindex = 1;
 static char Bindindex = 0;
 #endif
 
-static char g_lockMac1[3][32] = {{"4D4C00000844"},{"4D4C00000844"},{"4D4C00000844"}};//"4D4C00000844" test
+static char g_lockMac1[3][32] = {{"4D4C00000844"},{"4D5400001270"},{"4D4C00000844"}};//"4D4C00000844" test
 static char g_lockMac[32] = { };
 static char g_lockMacbak[32] = { };
 static char ssiValue[11][3] = {{"23"},{"26"},{"18"},{"20"},{"22"},{"15"},{"18"},{"21"},{"33"},{"13"}};
@@ -804,6 +804,25 @@ int com_ble_set_userpin(unsigned char *userpin)
 }
 
 /*************************************************
+ Function:     com_ble_get_userpin
+ Description:  获取用户PIN码
+ Input:        无
+ Output:       无
+ Return:       成功
+ Others:
+ *************************************************/
+int com_ble_get_userpin(void)
+{
+
+    unsigned char buf[10];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = 0;
+//    memcpy(buf + 1, userpin, 8);
+
+    send_touchuan_data(CMD_BLE_GET_PIN, 0, (char *)buf, 9);
+    return BLE_OK;
+}
+/*************************************************
  Function:     com_ble_set_broadrate
  Description:  设置广播间隔频率
  Input:
@@ -1244,7 +1263,48 @@ int cmd_security_check(RecvPacket *recvPacket)
     if (g_IsCheck == 1)
     {
         os_bluetooth_log(" cmd_security_check: g_IsCheck is 1, return.\n");
-        //return BLE_ERROR;
+    }
+
+    g_IsCheck = 1;
+    // 对收到的密码进行解密
+    unsigned char RecvBuf[10];
+    memset(RecvBuf, 0, sizeof(RecvBuf));
+    memcpy(RecvBuf, recvPacket->data, 8);
+    decrypt(RecvBuf, 8);
+
+    // 根据接收到的随机码生成登入密码、登入到远程蓝牙模块
+    creat_login_pwd(RecvBuf);
+    sprintf((char *)sendAtBuf, "AT+PWD[%s]", (char *)g_LoginPwd);
+    errCnt++;
+
+    if (errCnt % 2 == 0)
+    {
+        errCnt = 0;
+        return BLE_OK;
+    }
+    else
+    {
+        ATCmdSend(AT_R, AT_SET, sendAtBuf);
+        return BLE_OK;
+    }
+}
+
+/*************************************************
+ Function:     cmd_security_check_ext
+ Description:  安全验证命令2处理
+ Input:
+ recvPacket  接收到的数据
+ Output:       无
+ Return:
+ Others:
+ *************************************************/
+int cmd_security_check_ext(RecvPacket *recvPacket)
+{
+    unsigned char sendAtBuf[BLE_CMD_LEN] = {""};
+
+    if (g_IsCheck == 1)
+    {
+        os_bluetooth_log(" cmd_security_check: g_IsCheck is 1, return.\n");
     }
     g_IsCheck = 1;
 
@@ -1252,12 +1312,12 @@ int cmd_security_check(RecvPacket *recvPacket)
     unsigned char RecvBuf[10];
     memset(RecvBuf, 0, sizeof(RecvBuf));
     memcpy(RecvBuf, recvPacket->data, 8);
-    //os_bluetooth_log("RecvBuf is [%s]\n",RecvBuf);
-    //    os_bluetooth_log("RecvBuf is [%x][%x][%x][%x][%x][%x][%x][%x]\n",RecvBuf[0],RecvBuf[1],RecvBuf[2],RecvBuf[3],RecvBuf[4],RecvBuf[5],RecvBuf[6],RecvBuf[7]);
     decrypt(RecvBuf, 8);
+    strncpy(g_LoginPwd,RecvBuf,8);
+    g_LoginPwd[8] = '\0';
 
     // 根据接收到的随机码生成登入密码、登入到远程蓝牙模块
-    creat_login_pwd(RecvBuf);
+//    creat_login_pwd(RecvBuf);
 
     sprintf((char *)sendAtBuf, "AT+PWD[%s]", (char *)g_LoginPwd);
     //os_bluetooth_log("cmd_security_check_deal is %s\n",sendAtBuf);
@@ -1496,11 +1556,11 @@ void cmd_lock_list(RecvPacket *recvPacket)
    {
        if (g_BleState == BLE_FORCE_GET_LOCK_LIST)
        {
-           g_BleCallBackFunc(BLE_NOTI_FORCE_GET_LOCK_LIST, &usr_id, toal_len * 3 + 1);
+//           g_BleCallBackFunc(BLE_NOTI_FORCE_GET_LOCK_LIST, &usr_id, toal_len * 3 + 1);
        }
        else
        {
-           g_BleCallBackFunc(BLE_NOTI_GET_LOCK_LIST, &usr_id, toal_len * 3 + 1);
+//           g_BleCallBackFunc(BLE_NOTI_GET_LOCK_LIST, &usr_id, toal_len * 3 + 1);
        }
    }
 }
@@ -1523,18 +1583,18 @@ int parse_scan_signal(char *data, int size)
     unsigned char i = 0;
     char *p = NULL;
     int bleNum = 0;
-    os_bluetooth_log(" parse_scan_signal: start\n");
+
     if (data == NULL || size <= 0)
     {
         os_bluetooth_log(" parse_scan_signal: input argument error.\n");
         return BLE_ERROR;
     }
+
     bleNum = storage_get_object_num(DEVICE_OBJ_ID);
-    //    for ( i = 0; i < bleNum; i++ )
-    //    {
     char LockMac[32] = {0};
     int bleIndex;
     int ret = 0;
+
     for (bleIndex = 0; bleIndex < bleNum; bleIndex++)
     {
         ret = storage_get_ble_mac(bleIndex, LockMac);
@@ -1647,7 +1707,6 @@ int parse_scan_signal(char *data, int size)
              }
         }
     }
-    //    }
     return BLE_ERROR;
 }
 
@@ -1746,19 +1805,31 @@ int distribute_cmd_deal(RecvPacket *recvPacket)
 {
     recvPacket->Cmd &= 0x7F;
     os_bluetooth_log("distribute_cmd_deal: RecCmd : 0x%02x g_BleState[%d]\n", recvPacket->Cmd, g_BleState);
-
-    switch (recvPacket->Cmd)
+    if( storage_get_mac_sucess() != 0)
     {
-    case CMD_BLE_SECURITY_CHECK:
-    {
-        cmd_security_check(recvPacket);
-    }
-    break;
+        PrintfByteHex("data",recvPacket->data,recvPacket->datalen);
+        if(recvPacket->Cmd == CMD_BLE_SECURITY_CHECK_TWO )
+        {
+            cmd_security_check_ext(recvPacket);
+        }
 
-    default:
-        os_bluetooth_log("distribute_cmd_deal: cmd is not support!!!");
-        break;
     }
+    else
+    {
+        switch (recvPacket->Cmd)
+       {
+       case CMD_BLE_SECURITY_CHECK:
+       {
+           cmd_security_check(recvPacket);
+       }
+       break;
+
+       default:
+           os_bluetooth_log("distribute_cmd_deal: cmd is not support!!!");
+           break;
+       }
+    }
+
     return BLE_OK;
 }
 
@@ -1850,6 +1921,15 @@ int responsion_cmd_deal(RecvPacket *recvPacket)
         }
         break;
     }
+    case CMD_BLE_GET_PIN:
+    {
+        PrintfByteHex("data",recvPacket->data,10);
+        memcpy( DeviceObj.uuid, &recvPacket->data[1], 8);
+        DeviceObj.uuid[8] = 0;
+        storage_set_present_userpin(DeviceObj.uuid);
+        notify_lockstate(0, BLE_NOTI_GET_LOCKINFO, recvPacket->data[0]);
+    }
+    break;
     case CMD_BLE_SET_PIN:
         if (g_BleState == BLE_SET_USERPIN)
         {
@@ -1870,24 +1950,23 @@ int responsion_cmd_deal(RecvPacket *recvPacket)
             }
             else
             {
+                os_bluetooth_log("g_lockMac1[%s]Binindex[%d]g_lockMacbak[%s]",g_lockMac1[Bindindex],Bindindex,g_lockMacbak);
                 if ( !strcmp( g_lockMacbak, g_lockMac1[Bindindex] ) )
                 {
                     memcpy(DeviceObj.mac, g_lockMac1[Bindindex], sizeof(DeviceObj.mac));
-                    os_bluetooth_log("g_lockMac1 : %s Binindex : %d g_lockMacbak : %s",g_lockMac1[Bindindex - 1],Bindindex,g_lockMacbak);
+
                 }
                 else
                 {
                     memcpy(DeviceObj.mac, g_lockMacbak, sizeof(DeviceObj.mac));
-                    os_bluetooth_log("g_lockMac1 : %s Binindex : %d g_lockMacbak : %s",g_lockMac1[Bindindex - 1],Bindindex,g_lockMacbak);
 
                 }
-
 
 
             }
 
             storage_write_dev_obj(OBJECT_UPDATE_ADD, 1, &DeviceObj);
-            //stor_set_userpin((char *)g_tempUserPin);
+
         }
         notify_lockstate(0, BLE_NOTI_SET_USERPIN, recvPacket->data[0]);
         break;
@@ -1896,12 +1975,11 @@ int responsion_cmd_deal(RecvPacket *recvPacket)
         if (g_BleState == BLE_SET_BROADRATE)
         {
             com_ble_disconnect();
-            //g_BleState = BLE_IDLE;
         }
 
         if (_GET_BIT_(recvPacket->data[0], 7) == 0)
         {
-            //stor_set_powermode(g_tempBroadrate);
+
         }
         notify_lockstate(0, BLE_NOTI_SET_BROADRATE, recvPacket->data[0]);
         if (g_BleState == BLE_SET_BROADRATE)
@@ -2313,12 +2391,17 @@ int deal_login_ok(void)
     switch (g_BleState)
     {
     case BLE_LOCK_BIND:
-        if (g_BleCallBackFunc)
+        if(storage_get_mac_sucess() != 0 )
+        {
+            com_ble_get_userpin();
+        }
+        else
         {
             g_BleState = BLE_GET_LOCKINFO;
             com_ble_get_lockinfo();
             refresh_timeout(0);
         }
+
         break;
 
     case BLE_SET_USERPIN:
@@ -2473,8 +2556,6 @@ int deal_error(int mode)
             g_BleState = BLE_IDLE;
             g_ScanState = 0;
             send_touchuan_flag = 0;
-           // g_add_del_tmp_pass = 0;
-         //   g_del_tmp_pass = 0;
             os_bluetooth_log("g_BleState : %d",g_BleState);
         }
         break;
@@ -2810,17 +2891,34 @@ static int deal_recv_tunnel(unsigned char *data, int len)
     }
     else if ((data[3] & 0x7F) == CMD_BLE_SECURITY_CHECK && len > 13)
     {
-        int num = len / 13;
-        int i = 0;
-        for (i = 0; i < num; i++)
+        if( storage_get_mac_sucess() == 0)
         {
-            recv_touchuan_data(data + i * 13, 13);
+            int num = len / 13;
+            int i = 0;
+            for (i = 0; i < num; i++)
+            {
+                recv_touchuan_data(data + i * 13, 13);
+            }
         }
+
     }
     else
     {
         //        os_bluetooth_log("deal_recv_tunnel: data[3]= %02X\n", data[3]);
-        recv_touchuan_data(data, len);
+        if(g_PwdEcho == FALSE)
+        {
+            int num = len / 13;
+            int i = 0;
+            for (i = 0; i < num; i++)
+            {
+                recv_touchuan_data(data + i * 13, 13);
+            }
+        }
+        else
+        {
+            recv_touchuan_data(data, len);
+        }
+
     }
 
     return BLE_OK;
@@ -3176,25 +3274,19 @@ int Ble_Send_deal_thread(void *argv)
  *************************************************/
 int ble_scan_thread(void *argv)
 {
-    os_bluetooth_log("ble_scan_thread !!!");
-#define MAX_SCAN_TIMEOUT 16
+    #define MAX_SCAN_TIMEOUT 20
     static unsigned int BlestateCnt = 0;
     int bleIndex = 0;
     int bleNum = 0;
     storage_get_ble_mac(bleIndex, g_lockMac);
     os_bluetooth_log("g_lockMac[%s]\n",g_lockMac);
+
     while (1)
     {
         msleep(1000);
-
         bleNum = storage_get_object_num(DEVICE_OBJ_ID);
         for (bleIndex = 0; bleIndex < bleNum; bleIndex++)
         {
-//            if (strlen(g_lockMac) != BLU_MAC_LEN)
-//            {
-//                IdleCnt = 0;
-//                continue;
-//            }
             if (g_BleState == BLE_IDLE && g_ScanState == 0 && get_loginAuthInterval() == 1 )
             {
                 if (++IdleCnt >= MAX_SCAN_TIMEOUT)
@@ -3206,11 +3298,9 @@ int ble_scan_thread(void *argv)
                     os_bluetooth_log("IdleCnt: %d ssivaluecount : %d\n", IdleCnt,ssivaluecount);
 
                 }
-                if(++BlestateCnt >= 8)
+                if(++BlestateCnt >= MAX_SCAN_TIMEOUT - 8)
                 {
                     com_ble_get_stas();
-
-
                     BlestateCnt = 0;
                     g_bindSate = 0;
                     rssiValueindex++;
@@ -3231,10 +3321,15 @@ int ble_scan_thread(void *argv)
     }
 }
 
+/**
+ *
+ * @param 清空超时
+ */
 void refresh_timeout(uint8_t flag)
 {
     TimeoutCnt = flag;
 }
+
 /*************************************************
  Function:     ble_timeout_thread
  Description:  蓝牙操作超时处理
@@ -3250,8 +3345,8 @@ int ble_timeout_thread(void *argv)
 
     unsigned char lockbuf[1] = {0};
     int state = 0;
-    static char online = 1;
     static int Bind_Timeout = 0;
+
     while (1)
     {
         msleep(1000);
@@ -3265,6 +3360,11 @@ int ble_timeout_thread(void *argv)
                     os_bluetooth_log("Bind_Timeout : %d",Bind_Timeout);
                     g_bind_status = 0;
                     Bind_Timeout = 0;
+                    Bindindex++;
+                    if(Bindindex == 3)
+                    {
+                       Bindindex = 0;
+                    }
                     ble_bind_lock_start();
 
                 }
@@ -3272,17 +3372,16 @@ int ble_timeout_thread(void *argv)
 
         }
 
-
-        if(ssivaluecount % 8 == 0 && elink_get_join_net_status() == 1)
-        {
-            ssivaluecount = 1;
-            if (g_BleCallBackFunc)
-            {
-               g_BleCallBackFunc(BLE_NOTI_RSSI_UPLINK,
-                                 ssiValue[rssiValueindex],
-                                1);
-            }
-        }
+//        if(ssivaluecount % 8 == 0 && elink_get_join_net_status() == 1)
+//        {
+//            ssivaluecount = 1;
+//            if (g_BleCallBackFunc)
+//            {
+//               g_BleCallBackFunc(BLE_NOTI_RSSI_UPLINK,
+//                                 ssiValue[rssiValueindex],
+//                                1);
+//            }
+//        }
 
 
         if (g_BleState == BLE_UNLOCK)
@@ -3308,6 +3407,7 @@ int ble_timeout_thread(void *argv)
                 state = BLE_NOTI_ECHO_ERROR;
                 com_ble_disconnect();
                 g_BleCallBackFunc(BLE_NOTI_BIND_LOCK, (char *)&state, 1);
+
             }
 
         }
@@ -3421,7 +3521,6 @@ int ble_bind_lock_end(void)
     if (g_BleState == BLE_LOCK_BIND)
     {
         g_BleState = BLE_IDLE;
-        //g_ScanState = 0;
         g_scanTimes = 0;
         g_IsCheck = 0;
     }
@@ -3444,7 +3543,7 @@ int ble_bind_lock_bymac(char *blemac)
         os_bluetooth_log(" ble_bind_lock_bymac: blemac error.\n");
         return BLE_ERROR;
     }
-    os_bluetooth_log(" ble_bind_lock_bymac\n");
+
     g_BleState = BLE_LOCK_BIND;
     memset(g_lockMac, 0, sizeof(g_lockMac));
     memcpy(g_lockMac, blemac, strlen(blemac));
@@ -3490,14 +3589,14 @@ int ble_set_userpin(char *pUserpin)
  *************************************************/
 int ble_set_broadrate(unsigned char mode)
 {
-#ifdef BLE_DEVICE
     char *lockmac = storage_get_present_lockmac();
-#endif
+
     if (lockmac == NULL || strlen(lockmac) != BLU_MAC_LEN)
     {
         os_bluetooth_log(" ble_set_broadrate, lockmac error.\n");
         return BLE_ERROR;
     }
+
     g_BleState = BLE_SET_BROADRATE;
     g_tempBroadrate = mode;
     com_ble_connect(lockmac);
@@ -3515,18 +3614,19 @@ int ble_set_broadrate(unsigned char mode)
 int ble_unlock_start(void)
 {
     char *lockmac = storage_get_present_lockmac();
+
     if (lockmac == NULL || strlen(lockmac) != BLU_MAC_LEN)
     {
         os_bluetooth_log(" ble_unlock_start, lockmac error.\n");
         return BLE_ERROR;
     }
+
     if (g_BleState == BLE_GET_RECORD_INFO)
     {
         com_ble_disconnect();
     }
-    g_BleState = BLE_UNLOCK;
 
-    os_bluetooth_log(" ble_unlock_start: start timer.[%d]\n", mico_rtos_get_time());
+    g_BleState = BLE_UNLOCK;
     com_ble_connect(lockmac);
     return BLE_OK;
 }
@@ -3541,15 +3641,14 @@ int ble_unlock_start(void)
  *************************************************/
 int ble_set_channel(void)
 {
-#ifdef BLE_DEVICE
     char *lockmac = storage_get_present_lockmac();
-#endif
 
     if (lockmac == NULL || strlen(lockmac) != BLU_MAC_LEN)
     {
         os_bluetooth_log(" ble_unlock_start, lockmac error.\n");
         return BLE_ERROR;
     }
+
     g_BleState = BLE_SET_LOCKCHANGNEL;
     com_ble_connect(lockmac);
     return BLE_OK;
@@ -3559,9 +3658,9 @@ int ble_set_channel(void)
  */
 void ble_set_adminpassword(void)
 {
-    OSStatus ret;
     stBLELockStatus lockstate;
     stor_lockstatue_read(&lockstate);
+
     if ( !strcmp( lockstate.g_adminpwd, g_adminpwd ) )
     {
         os_bluetooth_log("lockstate.admin : [%x][%x][%x][%x]",lockstate.g_adminpwd[0],lockstate.g_adminpwd[1],\
@@ -3572,12 +3671,11 @@ void ble_set_adminpassword(void)
         memcpy(lockstate.g_adminpwd,g_adminpwd,sizeof(g_adminpwd));
         os_bluetooth_log("lockstate.admin : [%x][%x][%x][%x]",lockstate.g_adminpwd[0],lockstate.g_adminpwd[1],\
                         lockstate.g_adminpwd[2],lockstate.g_adminpwd[3]);
-        ret = stor_lockstatue_write( OBJECT_UPDATE_ADD, 1, &lockstate );
+        stor_lockstatue_write( OBJECT_UPDATE_ADD, 1, &lockstate );
     }
 
-
-
 }
+
 /***
  *  获取管理员密码
  */
@@ -3589,26 +3687,34 @@ void ble_get_adminpassword(void)
     os_bluetooth_log("g_adminpwd : [%x][%x][%x][%x]",g_adminpwd[0],g_adminpwd[1],\
                  g_adminpwd[2],g_adminpwd[3]);
 }
+/**
+ *
+ * @添加临时秘钥
+ */
 int ble_add_tmp_pwd(void)
 {
     char *lockmac = storage_get_present_lockmac();
     IdleCnt = 1;
     g_add_del_tmp_pass = 1;
     refresh_timeout(0);
+
     if (lockmac == NULL || strlen(lockmac) != BLU_MAC_LEN)
     {
        os_bluetooth_log(" ble_unlock_start, lockmac error.\n");
        return BLE_ERROR;
     }
+
     g_BleState = BLE_ADD_TMP_SEC_UNLOCK;
+
     if(g_linknoflag == 1)
     {
         g_connectFlag = 0;
         g_linkyFlag = 0;
         com_ble_connect(lockmac);
     }
+
 }
-/***********stor_lockstatue_read**************************************
+/*************************************************
  Function:     ble_add_tmp_pwd_start
  Description:
  Input:        添加临时秘钥开门
@@ -3623,11 +3729,13 @@ int ble_add_tmp_pwd_start(uint16_t id, uint8_t locktype, uint8_t *adminpwd, uint
     g_add_del_tmp_pass = 1;
     IdleCnt = 1;
     char *lockmac = storage_get_present_lockmac();
+
     if (lockmac == NULL || strlen(lockmac) != BLU_MAC_LEN)
     {
         os_bluetooth_log(" ble_unlock_start, lockmac error.\n");
         return BLE_ERROR;
     }
+
     g_usrid = id;
     g_locktype = locktype;
     memset(g_adminpwd, 0, sizeof(g_adminpwd));

@@ -1245,81 +1245,7 @@ int elink_deal_subdev_add_tmp_key_list( char * reqSequence, char *deviceId, char
     return ret;
 }
 
-/**
- * 子设备解绑
- */
 
-int elink_deal_subdev_unbind( char * reqSequence, char *deviceId, char *msg, int msgLen)
-{
-    int ret = ELINK_RETURN_OK;
-   struct json_object *parse_json_object = NULL;
-   char * result, *strTemp, *sequence = NULL;
-   int status = json_checker_string( msg, msgLen );
-   if ( !status )
-   {
-       elink_log("json data is illegal");
-       ret = ELINK_INVALID_PARA;
-   }
-   parse_json_object = json_tokener_parse( msg );
-   if ( parse_json_object != NULL )
-   {
-       json_object_object_foreach( parse_json_object, key, val )
-       {
-           if ( !strcmp( key, ELink_JSON_result ) )
-           {
-              result = json_object_get_string( val );
-              if ( result != NULL && strcmp( result, ELink_JSON_result_OK ) != 0 )
-              {
-                  ret = ELINK_INVALID_PARA;
-              }
-           }
-           if ( !strcmp( key, ELink_JSON_sequence ) )
-           {
-               sequence = json_object_get_string( val );
-               if ( sequence )
-               {
-                   sprintf( g_elink_devinfo->Resequence, "%s", sequence );
-
-                   elink_log("g_elink_devinfo->Resequence : %s",g_elink_devinfo->Resequence);
-               }
-               else
-               {
-                   elink_log("sequence err!");
-                   ret = ELINK_INVALID_PARA;
-               }
-           }
-           if ( !strcmp( key, ELink_JSON_deviceId ) )
-           {
-               strTemp = json_object_get_string( val );
-               if ( strTemp != NULL )
-               {
-                   sprintf( g_elink_devinfo->devid, "%s", strTemp );
-               }
-               else
-               {
-                   elink_log("deviceId exsit err!");
-                   ret = ELINK_DEV_ID_NO_EXSIT;
-               }
-
-           }
-           if ( !strcmp( key, ELink_JSON_time ) )
-           {
-               g_elink_comminfo->time = json_object_get_int( val );
-               //进行时间同步
-           }
-       }
-       json_object_put( parse_json_object );/*free memory*/
-       parse_json_object = NULL;
-       ret = ELINK_RETURN_OK;
-   }
-   else
-   {
-       json_object_put( parse_json_object );/*free memory*/
-       parse_json_object = NULL;
-       ret = ELINK_INVALID_PARA;
-   }
-   return ret;
-}
 /***
  * 通讯解包及分发处理
  */
@@ -1414,9 +1340,9 @@ int elink_parse_unpack( char *reqSequence, char *revbuf, int revlen )
                 g_elink_comminfo->loginlasttime = time( 0 );
                 g_elink_comminfo->temptime =  time( 0 );
                 msleep( 500 );
-                elink_gw_heartreport();
-                msleep( 500 );
-                ble_force_get_lock_list( 0 );
+                elink_gw_heartreport();   //取消设备资源上报
+//                msleep( 500 );
+//                ble_force_get_lock_list( 0 );
 
 
             }
@@ -1457,45 +1383,6 @@ int elink_parse_unpack( char *reqSequence, char *revbuf, int revlen )
 
     }
 
-
-    if ( !strcmp( elink_strcode, ELink_Code_SubOnlineReport_echo ) )
-    {
-        //子设备在线状态上报处理
-        uint8_t flag = 0;
-        AES_CBC_Decrypt_Base64( strData, strlen( strData ), g_elink_comminfo->sessionKey, 16,
-                                g_elink_comminfo->sessionKey,
-                                16, plainMsg, &plainMsgLen );
-        if ( plainMsgLen != 0 )
-        {
-            ret = elink_deal_subdev_onlineEcho( reqSequence, plainMsg, plainMsgLen );
-            if ( ret == 0 )
-            {
-                if(elink_get_subonline_status() == 1)
-                {
-                    msleep( 500 );
-                    flag = 0;
-                    ble_force_get_lock_list( flag );
-                }
-
-                /**发送一次强制获取锁列表信息*/
-            }
-            else
-            {
-                msleep( 500 );
-                elink_set_subonline_status(1);
-                elink_sub_onlinereport( );
-            }
-
-        }
-        else
-        {
-            msleep( 500 );
-            elink_set_subonline_status(1);
-            elink_sub_onlinereport( );
-
-        }
-
-    }
 
     if ( !strcmp( elink_strcode, ELink_Code_StatusReport_echo ) )
     {
@@ -1704,46 +1591,9 @@ int elink_parse_unpack( char *reqSequence, char *revbuf, int revlen )
             }
 
         }
-        else
-        {
-//            elink_set_dev_errstrcode( ELINK_DEV_UNKOWN_ERR );
-        }
 
     }
-    else if(!strcmp( elink_strcode, ELink_Code_SubunBindReq ))  // 子设备解绑
-    {
-        char strcodetmp[10] = { 0 };
-        int ret = 0;
-        stBLELockStatus lockstate;
-        sprintf( strcodetmp, "%s", ELink_Code_DevResMangerReq );
-        elink_set_sub_code( &strcodetmp );
-        memset( &elink_rev_ctrl, 0, sizeof(TCP_SUBDEV_RSP_HEAD_T) );
-        AES_CBC_Decrypt_Base64( strData, strlen( strData ), g_elink_comminfo->sessionKey, 16,
-                                g_elink_comminfo->sessionKey,
-                                16, plainMsg, &plainMsgLen );
-        if ( plainMsgLen != 0 )
-              {
-                  elink_log("plainMsg : %s",plainMsg);
-                  ret = elink_deal_subdev_unbind( reqSequence, get_devid( ), plainMsg,
-                                                            plainMsgLen);
-                  if ( get_loginAuthInterval( ) == 1 )      // 授权过
-                  {
-                       if(ret == 0)
-                       {
 
-                           memset( &lockstate, 0, sizeof(stBLELockStatus) );
-                           stor_lockstatue_read( &lockstate );
-                           lockstate.isOperSuccess = 0xff;
-                           ret = stor_lockstatue_write( OBJECT_UPDATE_ADD, 1, &lockstate );
-                           if(ret == 0) // 解绑成功
-                           {
-                               g_elink_comminfo->authSucess = 0;  //子设备授权解除
-                           }
-                       }
-                  }
-              }
-    }
-//	elink_log("elink_parse_unpack revmsg[%d]: %s ",plainMsgLen,plainMsg);
     free( plainMsg );
     plainMsg = NULL;
     if(strData)
@@ -2521,9 +2371,9 @@ char* elink_get_pack_subdev_ResTmpReport( char* token, char *subdevid,
 }
 
 /**
- * 设备告警上报
+ * 设备攻击报警
  */
-char* elink_get_pack_subdev_AlarmReport( char* token, char *subdevid,
+char* elink_get_pack_subdev_AtkReport( char* token, char *subdevid,
                                          ELINK_ALARM_STATE_E alarmstate,
                                          uint8_t battery, char num,
                                          char *outReqSequence )
@@ -2533,108 +2383,127 @@ char* elink_get_pack_subdev_AlarmReport( char* token, char *subdevid,
     int count = 0;
     char *jsonString = NULL;
     struct json_object *dev_object = NULL;
-
-    struct json_object *json_object_serial_value = NULL;
+    struct json_object *json_object_event_array = NULL;
+    struct json_object *json_object_eventinfo_array = NULL;
+    struct json_object *json_object_event_value;
+    struct json_object *json_object_eventinfo_value;
 
     dev_object = json_object_new_object( );
-    json_object_serial_value = json_object_new_object( );
+    json_object_event_array = json_object_new_array( );
+    json_object_eventinfo_array = json_object_new_array( );
+    json_object_event_value = json_object_new_object( );
+    json_object_eventinfo_value = json_object_new_object( );
     sprintf( temp, "%d", st_get_req_sequence( ) );
     if ( outReqSequence )
         strcpy( outReqSequence, temp );
     json_object_object_add( dev_object, ELink_JSON_sequence, json_object_new_string( temp ) );
-//	json_object_object_add(dev_object, ELink_JSON_deviceId, json_object_new_string(g_elink_devid));
+//  json_object_object_add(dev_object, ELink_JSON_deviceId, json_object_new_string(g_elink_devid));
     json_object_object_add( dev_object, ELink_JSON_deviceId, json_object_new_string( subdevid ) );
-//	json_object_object_add(dev_object, "pin", json_object_new_string(pin));
+//  json_object_object_add(dev_object, "pin", json_object_new_string(pin));
     json_object_object_add( dev_object, ELink_JSON_time, json_object_new_int( time( 0 ) ) );
 
-    json_object_object_add( dev_object, ELink_JSON_Alarm, json_object_serial_value );
+    json_object_object_add( dev_object, ELink_JSON_Event, json_object_event_array );
 
-    json_object_object_add( json_object_serial_value, ELink_JSON_SerialId,
+    json_object_object_add( json_object_event_value, ELink_JSON_EventId,
+                            json_object_new_string( ELink_JSON_online_OK ) );
+
+    json_object_object_add( json_object_event_value, ELink_JSON_SerialId,
                             json_object_new_string( ELink_JSON_result_OK ) );
-    switch ( alarmstate )
-    {
-        case ELINK_ALARM_LINGER_STATE:
-            {
-            json_object_object_add( json_object_serial_value, ELink_JSON_StatusName,
-                                    json_object_new_string( ELink_AlarmInfo_LINGER ) );
 
-            json_object_object_add( json_object_serial_value, ELink_JSON_Dscp,
-                                       json_object_new_string( ELINK_JSON_dsp ) );
-            break;
-        }
-        case ELINK_ALARM_PASS_ATK_STATE:
-            {
-            json_object_object_add( json_object_serial_value, ELink_JSON_StatusName,
-                                    json_object_new_string( ELink_AlarmInfo_PASS_ATK ) );
+    json_object_object_add( json_object_event_value, ELink_JSON_EventName,
+                            json_object_new_string( ELink_EventName_LOCK_ALARM ) );
 
-            json_object_object_add( json_object_serial_value, ELink_JSON_Dscp,
-                                       json_object_new_string( ELINK_JSON_dsp ) );
-            break;
-        }
-        case ELINK_ALARM_HIJACK_STATE:
-            {
-            json_object_object_add( json_object_serial_value, ELink_JSON_StatusName,
-                                    json_object_new_string( ELink_AlarmInfo_HIJACK ) );
+    json_object_array_add( json_object_event_array, json_object_event_value );
 
-            json_object_object_add( json_object_serial_value, ELink_JSON_Dscp,
-                                       json_object_new_string( ELINK_JSON_dsp ) );
-            break;
-        }
-        case ELINK_ALARM_APP_ATK_STATE:
-            {
-            json_object_object_add( json_object_serial_value, ELink_JSON_StatusName,
-                                    json_object_new_string( ELink_AlarmInfo_APP_ATK ) );
+    json_object_object_add( json_object_event_value, ELink_JSON_EventInfo,
+                            json_object_eventinfo_array );
 
-            json_object_object_add( json_object_serial_value, ELink_JSON_Dscp,
-                                       json_object_new_string( ELINK_JSON_dsp ) );
-            break;
-        }
-        case ELINK_ALARM_FINGER_ATK_STATE:
-            {
-            json_object_object_add( json_object_serial_value, ELink_JSON_StatusName,
-                                    json_object_new_string( ELink_AlarmInfo_FINGER_ATK ) );
+    json_object_object_add( json_object_eventinfo_value, ELink_EventInfo_ALARM_TYPE,
+                            json_object_new_string( ELink_AlarmInfo_PASS_ATK ) );
 
-            json_object_object_add( json_object_serial_value, ELink_JSON_Dscp,
-                                       json_object_new_string( ELINK_JSON_dsp ) );
-            break;
-        }
-        case ELINK_ALARM_CARD_ATK_STATE:
-            {
-            json_object_object_add( json_object_serial_value, ELink_JSON_StatusName,
-                                    json_object_new_string( ELink_AlarmInfo_CARD_ATK ) );
+    json_object_object_add( json_object_eventinfo_value, ELink_EventInfo_TIME,
+                            json_object_new_int( time( 0 )  ) );
 
-            json_object_object_add( json_object_serial_value, ELink_JSON_Dscp,
-                                       json_object_new_string( ELINK_JSON_dsp ) );
-            break;
-        }
-        case ELINK_ALARM_BATTERY_WARN_STATE:
-            {
-            json_object_object_add( json_object_serial_value, ELink_JSON_StatusName,
-                                    json_object_new_string( ELINK_AlarmInfo_BATTERY_WARN ) );
-            memset( strtemp, 0, sizeof(strtemp) );
-            sprintf( strtemp, "%d", battery );
-            json_object_object_add( json_object_serial_value, ELink_JSON_CurStatusValue,
-                                    json_object_new_string( strtemp ) );
-
-            json_object_object_add( json_object_serial_value, ELink_JSON_Dscp,
-                                       json_object_new_string( ELINK_JSON_alarm ) );
-            break;
-        }
-        default:
-            break;
-    }
-
-
-    json_object_object_add( json_object_serial_value, ELink_JSON_AlarmTime,
-                            json_object_new_int( time( 0 ) ) );
+    json_object_array_add( json_object_eventinfo_array, json_object_eventinfo_value );
 
     jsonString = json_object_to_json_string( dev_object );
+
     json_object_put( dev_object );/*free memory*/
-    json_object_put( json_object_serial_value );
+    json_object_put( json_object_event_array );/*free memory*/
+    json_object_put( json_object_eventinfo_array );/*free memory*/
     dev_object = NULL;
-    json_object_serial_value = NULL;
+    json_object_event_array = NULL;
+    json_object_eventinfo_array = NULL;
     elink_log("jsonString : %s",jsonString);
-    return elink_get_pack_full( ELink_Code_StatusAlarm, jsonString, NULL, token );
+    return elink_get_pack_full( ELink_Code_EventReport, jsonString, NULL, token );
+}
+
+/**
+ * 设备告警上报
+ */
+char* elink_get_pack_subdev_AlarmReport( char* token, char *subdevid,
+                                         ELINK_ALARM_STATE_E alarmstate,
+                                         uint8_t battery, char num,
+                                         char *outReqSequence )
+{
+    unsigned char temp[32];
+    unsigned char strtrmp[10];
+    int count = 0;
+    char *jsonString = NULL;
+    struct json_object *dev_object = NULL;
+    struct json_object *json_object_statusSerials_array = NULL;
+    struct json_object *json_object_statusSerial_array = NULL;
+    struct json_object *json_object_value[num];
+    struct json_object *json_object_serial_value;
+
+    dev_object = json_object_new_object( );
+    json_object_statusSerials_array = json_object_new_array( );
+    json_object_statusSerial_array = json_object_new_array( );
+    sprintf( temp, "%d", st_get_req_sequence( ) );
+    if ( outReqSequence )
+        strcpy( outReqSequence, temp );
+    json_object_object_add( dev_object, ELink_JSON_sequence, json_object_new_string( temp ) );
+//  json_object_object_add(dev_object, ELink_JSON_deviceId, json_object_new_string(g_elink_devid));
+    json_object_object_add( dev_object, ELink_JSON_deviceId, json_object_new_string( subdevid ) );
+//  json_object_object_add(dev_object, "pin", json_object_new_string(pin));
+    json_object_object_add( dev_object, ELink_JSON_time, json_object_new_int( time( 0 ) ) );
+
+    json_object_object_add( dev_object, Elink_JSON_StatusSerials, json_object_statusSerials_array );
+    for ( count = 0; count < num; count++ )
+    {
+        json_object_value[count] = json_object_new_object( );
+
+        json_object_object_add( json_object_value[count], ELink_JSON_SerialId,
+                                json_object_new_string( ELink_JSON_result_OK ) );
+        json_object_array_add( json_object_statusSerials_array, json_object_value[count] );
+
+        json_object_object_add( json_object_value[count], Elink_JSON_StatusSerial,
+                                json_object_statusSerial_array );
+
+        json_object_serial_value = json_object_new_object( );
+
+        json_object_object_add( json_object_serial_value, ELink_JSON_StatusName,
+                                            json_object_new_string( ELink_StatusName_BATTERY_WARN ) );
+
+        memset( strtrmp, 0, sizeof(strtrmp) );
+
+        sprintf( strtrmp, "%d", 1 );
+        json_object_object_add( json_object_serial_value, ELink_JSON_CurStatusValue,
+                                json_object_new_string( strtrmp ) );
+        json_object_array_add( json_object_statusSerial_array, json_object_serial_value );
+
+    }
+
+    jsonString = json_object_to_json_string( dev_object );
+
+    json_object_put( dev_object );/*free memory*/
+    json_object_put( json_object_statusSerials_array );/*free memory*/
+    json_object_put( json_object_statusSerial_array );/*free memory*/
+    dev_object = NULL;
+    json_object_statusSerials_array = NULL;
+    json_object_statusSerial_array = NULL;
+    elink_log("jsonString : %s",jsonString);
+    return elink_get_pack_full( ELink_Code_StatusReport, jsonString, NULL, token );
 }
 
 /**

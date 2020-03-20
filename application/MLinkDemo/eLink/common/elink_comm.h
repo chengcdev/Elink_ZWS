@@ -14,8 +14,8 @@
 #define ELink_HARD_VER  "1.0.0.1"
 #define ELink_DevModel "MK-S06"
 #if 1
-//#define ELink_LOGIN_TCPHOST     "223.255.253.3:9012"
-#define ELink_LOGIN_TCPHOST		"180.100.133.131:9017"//"smarthome.thirdcloud.ott4china.com:9012"//"180.100.133.131:9017"
+#define ELink_LOGIN_TCPHOST     "223.255.253.3:9012"
+//#define ELink_LOGIN_TCPHOST		"180.100.133.131:9017"//"smarthome.thirdcloud.ott4china.com:9012"//"180.100.133.131:9017"
 #else
 #define ELink_LOGIN_TCPHOST		"192.168.12.110:9017"//"192.168.100.137:9017"//"192.168.12.108:9017"
 #endif

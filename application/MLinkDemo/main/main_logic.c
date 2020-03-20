@@ -2106,9 +2106,11 @@ int main_ble_callback_proc( BLE_NOTIFY_E state, char * data, int size )
                 elink_set_sub_reslist( NULL, 0);
                 elink_sub_restmpreport( );
             }
-
-            free( usr_id );
-            usr_id = NULL;
+            if(usr_id)
+            {
+                free( usr_id );
+                usr_id = NULL;
+            }
             break;
         }
         default:

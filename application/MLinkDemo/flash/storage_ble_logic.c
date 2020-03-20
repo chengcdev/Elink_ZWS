@@ -125,6 +125,11 @@ char * storage_get_present_userpin(void)
 //    sprintf(presentsysinfo.presentUsrPin,"%s","13572468");
     return presentsysinfo.presentUsrPin;
 }
+
+void storage_set_present_userpin(char *pin)
+{
+    strcpy(presentsysinfo.presentUsrPin,pin);
+}
 /********************************************************
  * function: storage_set_present_lockpin
  * description:

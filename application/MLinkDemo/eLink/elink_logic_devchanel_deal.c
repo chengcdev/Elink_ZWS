@@ -1177,7 +1177,7 @@ static int st_subdev_res_deal( char *revBuf, char *subdevid,
 
 }
 /***
- * 子设备资源变化上报
+ * 子设备资源变化上报处理
  */
 static int st_subdev_reschange_deal( char *revBuf, char *subdevid,
                                      BLEUSER_LISTRECORDLIST *g_elink_subeventinfo,
@@ -1327,10 +1327,21 @@ static int st_subdev_alarm_deal( char *revBuf, char *subdevid, ELINK_ALARM_STATE
     {
         //子设备告警上报处理
         MUTEX_LOCK(&g_elink_send_mutex);
-        buf = (char *) elink_get_pack_subdev_AlarmReport( g_elink_comminfo->token, subdevid,
-                                                          alarmstate,
-                                                          batterystatus,
-                                                          g_DevChannelParam->sequence );
+        if(alarmstate == ELINK_ALARM_BATTERY_WARN_STATE)
+        {
+            buf = (char *) elink_get_pack_subdev_AlarmReport( g_elink_comminfo->token, subdevid,
+                                                              alarmstate,
+                                                              batterystatus,num,
+                                                              g_DevChannelParam->sequence);
+        }
+        else
+        {
+            buf = (char *) elink_get_pack_subdev_AtkReport( g_elink_comminfo->token, subdevid,
+                                                                          alarmstate,
+                                                                          batterystatus,num,
+                                                                          g_DevChannelParam->sequence);
+        }
+
         if(buf == NULL)
         {
             MUTEX_UNLOCK(&g_elink_send_mutex);
@@ -1396,87 +1407,6 @@ static int st_subdev_eventinfo_deal( char *revBuf, char *subdevid,
     return ret;
 }
 
-/***
- * 子设备故障信息上报
- */
-static int st_subdev_err_deal( char *revBuf, char *subdevid, ELINK_RETURN_E errstate )
-{
-    int ret = 0;
-    int len;
-    char *buf = NULL;
-    TCP_FRAME_DATA_T sendData = { 0 };
-
-    elink_log("st_dev_connect_deal devConnectFlag %d",g_elink_comminfo->devConnectFlag);
-
-    int tcp_fd = g_elink_comminfo->devConnectFd;
-    if ( g_elink_comminfo->devConnectFlag == 1 && g_elink_comminfo->authSucess == 1 )
-    {
-        //子设备故障上报处理
-        MUTEX_LOCK(&g_elink_send_mutex);
-        buf = (char *) elink_get_pack_subdev_errReport( g_elink_comminfo->token, subdevid, errstate,
-                                                        g_DevChannelParam->sequence );
-        if(buf == NULL)
-        {
-            MUTEX_UNLOCK(&g_elink_send_mutex);
-            return -1;
-        }
-        memset( &sendData, 0, sizeof(TCP_FRAME_DATA_T) );
-        len = strlen( buf );
-        memcpy( sendData.data, buf, len );
-        sendData.dataSize = len;
-        sendData.TcpFd = tcp_fd;
-        tcp_push_node( &tcp_send_queue, &sendData );
-        if(buf)
-        {
-            free( buf );
-            buf = NULL;
-        }
-        elink_set_dev_busystate( 0 );
-        MUTEX_UNLOCK(&g_elink_send_mutex);
-    }
-    return ret;
-}
-
-/***
- * 子设备执行结果上报
- */
-static int st_subdev_operation_deal( char *subdevid, uint8_t operstate )
-{
-    int ret = 0;
-    int len;
-    char *buf = NULL;
-    TCP_FRAME_DATA_T sendData = { 0 };
-
-    elink_log("st_dev_connect_deal devConnectFlag %d",g_elink_comminfo->devConnectFlag);
-
-    int tcp_fd = g_elink_comminfo->devConnectFd;
-    if ( g_elink_comminfo->devConnectFlag == 1 && g_elink_comminfo->authSucess == 1 )
-    {
-        //子设备告警上报处理
-        MUTEX_LOCK(&g_elink_send_mutex);
-        buf = (char *) elink_get_pack_subdev_OperastionStatusReport( g_elink_comminfo->token,
-                                                                     subdevid,
-                                                                     operstate,
-                                                                     g_DevChannelParam->sequence );
-        if(buf == NULL)
-        {
-           MUTEX_UNLOCK(&g_elink_send_mutex);
-           return -1;
-        }
-        memset( &sendData, 0, sizeof(TCP_FRAME_DATA_T) );
-        len = strlen( buf );
-        memcpy( sendData.data, buf, len );
-        sendData.dataSize = len;
-        sendData.TcpFd = tcp_fd;
-        tcp_push_node( &tcp_send_queue, &sendData );
-        if(buf)
-        {
-            free( buf );
-            buf = NULL;
-        }
-        MUTEX_UNLOCK(&g_elink_send_mutex);
-    }
-}
 
 /***
  * 网关心跳请求上报
@@ -1569,6 +1499,7 @@ void elink_sub_ctrlechoreport( char *code, ELINK_RETURN_E strcode )
         //发送子设备查询状态应答
         MUTEX_LOCK(&g_elink_send_mutex);
         sprintf( code, "%s", ELink_Code_StatusQuery_echo );
+
         if(strcmp( get_devid, g_elink_devinfo->devid ) == 0 )  //网关状态
         {
             buf = (char *) elink_echo_pack_dev_ctrl( g_elink_comminfo->token,
@@ -1618,19 +1549,20 @@ void elink_sub_ctrlechoreport( char *code, ELINK_RETURN_E strcode )
             MUTEX_UNLOCK(&g_elink_send_mutex);
             return ;
         }
+
         memset( &sendData, 0, sizeof(TCP_FRAME_DATA_T) );
         len = strlen( buf );
         memcpy( sendData.data, buf, len );
         sendData.dataSize = len;
         sendData.TcpFd = tcp_fd;
-//      elink_log("sendData.data : %s ",sendData.data);
-        elink_log("g_DevChannelParam->loginTcpFd : %d",g_DevChannelParam->loginTcpFd);
         tcp_push_node( &tcp_send_queue, &sendData );
+
         if(buf)
         {
             free( buf );
             buf = NULL;
         }
+
         elink_set_dev_busystate( 0 );
         MUTEX_UNLOCK(&g_elink_send_mutex);
     }
@@ -1653,8 +1585,7 @@ void elink_sub_ctrlechoreport( char *code, ELINK_RETURN_E strcode )
  *************************************************/
 void elink_sub_resreport( void )
 {
-    uint8_t ret = 0;
-    ret = st_subdev_res_deal( NULL, get_devid( ), elink_get_sub_reslist( ),
+   st_subdev_res_deal( NULL, get_devid( ), elink_get_sub_reslist( ),
                               elink_get_sub_reslistcout( ),elink_get_sub_status( ) );
 }
 
@@ -1668,8 +1599,7 @@ void elink_sub_resreport( void )
  *************************************************/
 void elink_sub_reschangereport( void )
 {
-    uint8_t ret = 0;
-    ret = st_subdev_reschange_deal( NULL, get_devid( ), elink_get_sub_reslist( ),
+    st_subdev_reschange_deal( NULL, get_devid( ), elink_get_sub_reslist( ),
                                     elink_get_sub_reslistcout( ) );
 }
 /*************************************************
@@ -1682,8 +1612,7 @@ void elink_sub_reschangereport( void )
  *************************************************/
 void elink_sub_restmpchangereport( void )
 {
-    uint8_t ret = 0;
-    ret = st_subdev_reschangetmp_deal( NULL, get_devid( ), elink_get_sub_reslist( ),
+    st_subdev_reschangetmp_deal( NULL, get_devid( ), elink_get_sub_reslist( ),
                                  elink_get_sub_reslistcout( ),
                                  elink_get_dev_restmpFlag( ) );
 }
@@ -1697,8 +1626,7 @@ void elink_sub_restmpchangereport( void )
  *************************************************/
 void elink_sub_restmpreport( void )
 {
-    uint8_t ret = 0;
-    ret = st_subdev_restmpreport_deal( NULL, get_devid( ), elink_get_sub_reslist( ),
+    st_subdev_restmpreport_deal( NULL, get_devid( ), elink_get_sub_reslist( ),
                                  elink_get_sub_reslistcout( ),
                                  elink_get_dev_restmpFlag( ),elink_get_sub_status( ) );
 }
@@ -1712,8 +1640,7 @@ void elink_sub_restmpreport( void )
  *************************************************/
 void elink_sub_statusreport( void )
 {
-    uint8_t ret = 0;
-    ret = st_subdev_status_deal( NULL, get_devid( ), elink_get_sub_status( ), 1 );
+    st_subdev_status_deal( NULL, get_devid( ), elink_get_sub_status( ), 1 );
 }
 
 /*************************************************
@@ -1726,8 +1653,7 @@ void elink_sub_statusreport( void )
  *************************************************/
 void elink_sub_signalreport( void )
 {
-    uint8_t ret = 0;
-    ret = st_subdev_signal_deal( NULL, get_devid( ), elink_get_sub_status( ), 1 );
+    st_subdev_signal_deal( NULL, get_devid( ), elink_get_sub_status( ), 1 );
 }
 /*************************************************
  Function:     elink_sub_demolishreport
@@ -1739,69 +1665,10 @@ void elink_sub_signalreport( void )
  *************************************************/
 void elink_sub_demolishreport( void )
 {
-    uint8_t ret = 0;
-    ret = st_subdev_demolish_deal( NULL, get_devid( ), elink_get_sub_status( ), 1 );
-}
-/*************************************************
- Function:     elink_sub_onlinereport
- Description:  子设备在线状态上报
- Input:
- queue
- Output:
- Return:
- *************************************************/
-void elink_sub_onlinereport( void )
-{
-    uint8_t ret = 0;
-    ret = st_subdev_online_deal( NULL, get_devid( ),elink_get_subonline_status( ) );
-
+    st_subdev_demolish_deal( NULL, get_devid( ), elink_get_sub_status( ), 1 );
 }
 
-#ifdef BEEP
-static void _beep_Timeout_handler( void* arg )
-{
-    if(_beep_timer_initialized == true)
-      {
-        mico_stop_timer(&_beep_timer);
-        mico_deinit_timer( &_beep_timer );
-        _beep_timer_initialized = false;
-      }
-    mlink_gpio_beep_off();
-}
-#endif
-/*************************************************
- Function:     elink_sub_authorityreport
- Description:  子设备鉴权上报
- Input:
- queue
- Output:
- Return:
- *************************************************/
-void elink_sub_authorityreport( void )
-{
-    uint8_t ret = 0;
-    ret = st_subdev_authority_deal( NULL, get_devid( ), get_subpin( ) );
-    if(ret != 0)
-    {
-        elink_sub_authorityreport();
-    }
-    if ( elink_get_join_net_status( ) == 0xff )
-    {
-#ifdef BEEP
-        if(_beep_timer_initialized == true)
-         {
-           mico_stop_timer(&_beep_timer);
-           mico_deinit_timer( &_beep_timer );
-           _beep_timer_initialized = false;
-         }
-         mlink_gpio_beep_on();
-         mico_init_timer(&_beep_timer, SYS_BEEP_TRIGGER_INTERVAL, _beep_Timeout_handler, NULL);
-         mico_start_timer(&_beep_timer);
-         _beep_timer_initialized = true;
-#endif
-    }
 
-}
 /*************************************************
  Function:     elink_sub_alarmreport
  Description:  子设备告警上报
@@ -1812,10 +1679,11 @@ void elink_sub_authorityreport( void )
  *************************************************/
 void elink_sub_alarmreport( void )
 {
-    uint8_t ret = 0;
-    ret = st_subdev_alarm_deal( NULL, get_devid( ), elink_get_sub_alarmstatus( ),
+
+    st_subdev_alarm_deal( NULL, get_devid( ), elink_get_sub_alarmstatus( ),
                                 elink_get_sub_batterystatus( ),
                                 1 );
+
 }
 /*************************************************
  Function:     elink_sub_eventreport
@@ -1845,38 +1713,22 @@ void elink_gw_heartreport( void )
     g_heatflag = 1;
     ret = st_gw_heart_deal( );
 }
-/*************************************************
- Function:     elink_sub_errreport
- Description:  子设备错误信息上报
- Input:
- queue
- Output:
- Return:
- *************************************************/
-void elink_sub_errreport( ELINK_RETURN_E errstate )
-{
-    uint8_t ret = 0;
-    ret = st_subdev_err_deal( NULL, get_devid( ), errstate );
-}
 
 
 void tcp_client_thread( mico_thread_arg_t arg )
 {
     UNUSED_PARAMETER( arg );
-
     OSStatus err;
     int tcp_fd = -1;
     char *buf = NULL;
     buf = (char*) malloc( TCP_REV_BUFFER_LEN_MAX );
     require_action( buf, exit, err = kNoMemoryErr );
 
-
     while ( 1 )
     {
         //1.连接登录服务器
         if(get_sntp() ==  1 && ble_init_finish() == 1)
         {
-
             if(g_heatflag == 1)
             {
                  g_heattimeout--;
@@ -1885,7 +1737,8 @@ void tcp_client_thread( mico_thread_arg_t arg )
                      g_elink_comminfo->devConnectFd = -1;
                      g_DevChannelParam->loginFlag = 0;
                  }
-           }
+            }
+
             if ( st_login_tcphost_deal( buf ) < 0 )
             {
                 mico_rtos_thread_sleep( 3 );
@@ -1893,7 +1746,7 @@ void tcp_client_thread( mico_thread_arg_t arg )
             }
 
             if ( g_DevChannelParam->loginFlag != 1 )
-                continue;
+                    continue;
 
             if ( g_DevChannelParam->loginTcpFd >= 0 )
             {
@@ -1938,41 +1791,41 @@ void tcp_send_thread( mico_thread_arg_t arg )
     UNUSED_PARAMETER( arg );
     int len = 0;
     PTCP_FRAME_DATA_T psendData = NULL;
-    OSStatus err;
+
     while ( 1 )
     {
-//		msleep(50);
-
         if ( psendData != NULL )
         {
             free( psendData );
             psendData = NULL;
         }
+
         psendData = tcp_pop_node( &tcp_send_queue );
+
         if ( psendData == NULL )
         {
             msleep( 50 );
             continue;
 
         }
+
         if ( psendData != NULL )
         {
-//            elink_log("data : %s",psendData->data);
-//            elink_log("psendData->TcpFd : %d",psendData->TcpFd);
             len = send( psendData->TcpFd, psendData->data, psendData->dataSize, 0 );
             if(len <= 0)
             {
-                   SocketClose( &psendData->TcpFd );
-                   g_elink_comminfo->devConnectFd = -1;
-                   g_DevChannelParam->loginFlag = 0;
+               SocketClose( &psendData->TcpFd );
+               g_elink_comminfo->devConnectFd = -1;
+               g_DevChannelParam->loginFlag = 0;
             }
-            elink_log("len : %d psendData->TcpFd : %d ",len,psendData->TcpFd);
         }
-        
-        free( psendData );
-        psendData = NULL;
-    }
 
+        if(psendData)
+        {
+            free( psendData );
+            psendData = NULL;
+        }
+    }
 }
 
 OSStatus elink_logic_init_devchannel( )
